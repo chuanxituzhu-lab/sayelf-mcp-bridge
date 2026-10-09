@@ -366,16 +366,25 @@ def resolve_windows_shim(path: str) -> list[str]:
 class ClaudeCodeHost(Host):
     runner: object = field(default=None, repr=False)   # injectable for tests
 
+    BROKEN_HINT = ("claude 命令指向的程序不存在（常见于自动更新中断：npm 外壳仍指向已被改名的 claude.exe）。"
+                   "请重装后再登记：npm install -g @anthropic-ai/claude-code")
+
     def _claude(self) -> str | None:
         return shutil.which("claude")
+
+    def _command(self) -> list[str]:
+        exe = self._claude()
+        if not exe:
+            raise HostError("HOST_CLI_MISSING", "claude")
+        resolved = resolve_windows_shim(exe)
+        if resolved == [exe] and exe.lower().endswith((".cmd", ".bat")):
+            raise HostError("HOST_CLI_BROKEN", self.BROKEN_HINT)
+        return resolved
 
     def _run(self, args: list[str]) -> subprocess.CompletedProcess:
         if self.runner is not None:
             return self.runner(args)
-        exe = self._claude()
-        if not exe:
-            raise HostError("HOST_CLI_MISSING", "claude")
-        return subprocess.run([*resolve_windows_shim(exe), *args], capture_output=True, text=True,
+        return subprocess.run([*self._command(), *args], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=60)
 
     def location(self) -> str:
@@ -385,7 +394,14 @@ class ClaudeCodeHost(Host):
         if self.runner is not None:
             return True, "test-runner"
         found = self._claude()
-        return (True, found) if found else (False, "")
+        if not found:
+            return False, ""
+        try:
+            self._command()
+        except HostError:
+            self.note = self.BROKEN_HINT
+            return False, found
+        return True, found
 
     def native_entry(self, server: Server) -> dict:
         command, args, env = launcher_entry(server)

@@ -248,6 +248,17 @@ class ShimTests(unittest.TestCase):
             self.assertEqual(str(js.resolve()), resolved[-1])
             self.assertEqual(2, len(resolved))
 
+    def test_stale_npm_shim_is_reported_as_broken_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            shim = base / "claude.cmd"
+            shim.write_text('"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*')
+            host = H.get("claude-code")
+            with patch.object(H.ClaudeCodeHost, "_claude", return_value=str(shim)):
+                self.assertFalse(host.detect()[0])
+                with self.assertRaisesRegex(H.HostError, "HOST_CLI_BROKEN"):
+                    host.current("demo")
+
     def test_non_shim_is_unchanged(self):
         self.assertEqual(["/usr/bin/claude"], H.resolve_windows_shim("/usr/bin/claude"))
 
