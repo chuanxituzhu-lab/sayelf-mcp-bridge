@@ -336,6 +336,32 @@ class CodexHost(Host):
 
 
 # --------------------------------------------------------------------------- Claude Code (CLI)
+_SHIM_TARGET = re.compile(r'"%~?dp0%?\\?([^"]+?\.(?:exe|js|cjs|mjs))"', re.I)
+
+
+def resolve_windows_shim(path: str) -> list[str]:
+    """npm on Windows installs ``claude.cmd``, a batch shim. Launching a batch file
+    from Python mangles its quoting, so read the shim and run its real target
+    (``...\\claude.exe`` or ``node ...\\cli.js``) directly."""
+    if not path.lower().endswith((".cmd", ".bat")):
+        return [path]
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return [path]
+    base = Path(path).parent
+    for match in _SHIM_TARGET.finditer(text):
+        target = (base / match.group(1).replace("\\", "/")).resolve()
+        if not target.is_file():
+            continue
+        if target.suffix.lower() == ".exe":
+            return [str(target)]
+        node = base / "node.exe"
+        return [str(node) if node.is_file() else (shutil.which("node") or "node"), str(target)]
+    sibling = base / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+    return [str(sibling)] if sibling.is_file() else [path]
+
+
 @dataclass
 class ClaudeCodeHost(Host):
     runner: object = field(default=None, repr=False)   # injectable for tests
@@ -349,7 +375,8 @@ class ClaudeCodeHost(Host):
         exe = self._claude()
         if not exe:
             raise HostError("HOST_CLI_MISSING", "claude")
-        return subprocess.run([exe, *args], capture_output=True, text=True, timeout=60)
+        return subprocess.run([*resolve_windows_shim(exe), *args], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=60)
 
     def location(self) -> str:
         return "claude mcp (user scope, ~/.claude.json)"

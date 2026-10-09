@@ -225,6 +225,33 @@ class ClaudeCodeTests(Base):
         self.assertEqual("--", add[add.index("demo") + 1])
 
 
+class ShimTests(unittest.TestCase):
+    def test_npm_cmd_shim_resolves_to_real_exe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            exe = base / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+            exe.parent.mkdir(parents=True)
+            exe.write_text("")
+            shim = base / "claude.cmd"
+            shim.write_text('@ECHO off\r\n"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*\r\n')
+            self.assertEqual([str(exe.resolve())], H.resolve_windows_shim(str(shim)))
+
+    def test_js_shim_runs_through_node(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            js = base / "node_modules" / "x" / "cli.js"
+            js.parent.mkdir(parents=True)
+            js.write_text("")
+            shim = base / "x.cmd"
+            shim.write_text('"%~dp0\\node_modules\\x\\cli.js" %*')
+            resolved = H.resolve_windows_shim(str(shim))
+            self.assertEqual(str(js.resolve()), resolved[-1])
+            self.assertEqual(2, len(resolved))
+
+    def test_non_shim_is_unchanged(self):
+        self.assertEqual(["/usr/bin/claude"], H.resolve_windows_shim("/usr/bin/claude"))
+
+
 class CliTests(Base):
     def test_install_without_yes_writes_nothing(self):
         (self.userhome / ".cursor").mkdir()
