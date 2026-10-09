@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sayelf-mcp-bridge"
+version = "0.1.0"
+description = "Register one MCP server definition into many agent hosts, safely"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[project.scripts]
+sayelf-mcp-bridge = "sayelf_mcp_bridge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sayelf_mcp_bridge", "sayelf_mcp_bridge.*"]

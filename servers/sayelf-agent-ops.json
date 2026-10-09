@@ -1,0 +1,8 @@
+{
+  "name": "sayelf-agent-ops",
+  "description": "Sayelf Agent Ops 执行内核：按交付物分派、产出自检、独立审核；Agent 不能批准，人工批准只在终端。",
+  "command": "{python}",
+  "args": ["-m", "sayelf_agent_ops.mcp_server"],
+  "cwd": "{skills_root}/sayelf-agent-ops",
+  "env": {}
+}
