@@ -190,6 +190,16 @@ class CodexTests(Base):
         self.assertEqual(sys.executable, data["mcp_servers"]["demo"]["command"])
         self.assertEqual(1, self.path.read_text(encoding="utf-8").count("[mcp_servers.demo]"))
 
+    def test_identical_unmarked_entry_is_adopted_without_force(self):
+        block = (f"\n[mcp_servers.demo]\ncommand = '{sys.executable}'\nargs = ['{FAKE}']\n"
+                 f"cwd = '{self.workdir}'\nstartup_timeout_sec = 60\n[mcp_servers.demo.env]\nA = '1'\n")
+        self.path.write_text(CODEX_EXISTING + block, encoding="utf-8")
+        out = H.get("codex").write(self.server, state.Ledger())
+        text = self.path.read_text(encoding="utf-8")
+        self.assertEqual(1, text.count("[mcp_servers.demo]"))
+        self.assertIn("# >>> sayelf-mcp-bridge: demo >>>", text)
+        self.assertTrue(out["changed"])
+
     def test_invalid_toml_is_never_written(self):
         self.path.write_text("not = = toml", encoding="utf-8")
         with self.assertRaisesRegex(H.HostError, "HOST_FILE_INVALID"):

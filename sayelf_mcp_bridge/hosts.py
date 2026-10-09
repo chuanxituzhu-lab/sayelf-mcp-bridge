@@ -68,9 +68,12 @@ class Host:
         raise NotImplementedError
 
     # Ownership: change or remove only entries this tool wrote and nobody edited since.
-    def _check_owned(self, name: str, existing: dict | None, ledger: state.Ledger, force: bool) -> None:
+    def _check_owned(self, name: str, existing: dict | None, ledger: state.Ledger, force: bool,
+                     desired: dict | None = None) -> None:
         if existing is None or force:
             return
+        if desired is not None and existing == desired:
+            return  # identical to what we would write: adopt it instead of calling it a conflict
         owned = ledger.owned(self.id, name)
         if owned is None:
             raise HostError("CONFLICT_UNOWNED", f"{self.id} already has '{name}' that this tool did not write; use --force to replace (backed up)")
@@ -185,8 +188,8 @@ class JsonHost(Host):
         servers = data.setdefault("mcpServers", {})
         if not isinstance(servers, dict):
             raise HostError("HOST_FILE_INVALID", "mcpServers is not an object")
-        self._check_owned(server.name, servers.get(server.name), ledger, force)
         entry = self.native_entry(server)
+        self._check_owned(server.name, servers.get(server.name), ledger, force, desired=entry)
         if servers.get(server.name) == entry:
             ledger.record(self.id, server.name, entry, str(self.path()))
             return {"changed": False, "path": str(self.path())}
@@ -302,8 +305,8 @@ class CodexHost(Host):
         existing = (before.get("mcp_servers") or {}).get(server.name)
         if existing is not None:
             existing = {k: v for k, v in existing.items() if k != "startup_timeout_sec"}
-        self._check_owned(server.name, existing, ledger, force)
         entry = self.native_entry(server)
+        self._check_owned(server.name, existing, ledger, force, desired=entry)
         if existing == entry and self._marks(server.name)[0] in text:
             ledger.record(self.id, server.name, entry, str(self.path()))
             return {"changed": False, "path": str(self.path())}
