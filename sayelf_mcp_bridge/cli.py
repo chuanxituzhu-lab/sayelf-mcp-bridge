@@ -70,7 +70,7 @@ def cmd_list(args) -> int:
     for path in sorted(folder.glob("*.json")):
         try:
             s = find(str(path), folder)
-            rows.append({"name": s.name, "command": s.command, "args": " ".join(s.args), "cwd": s.cwd or ""})
+            rows.append({"name": s.name, "command": s.url or s.command, "args": " ".join(s.args), "cwd": s.cwd or ""})
         except ManifestError as error:
             rows.append({"name": path.stem, "error": str(error)})
     _print(rows, args.json)

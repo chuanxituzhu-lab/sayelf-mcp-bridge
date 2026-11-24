@@ -1,4 +1,4 @@
-"""Host adapters: where and how each agent host registers a stdio MCP server.
+"""Host adapters: where and how each agent host registers an MCP server (local stdio or remote URL).
 
 Every adapter cites its evidence. ``official`` = the host's own docs;
 ``local`` = observed in the host's own config on this machine, docs silent;
@@ -118,6 +118,8 @@ class JsonHost(Host):
     detect_commands: tuple[str, ...] = ()
     with_type: bool = True
     supports_cwd: bool = False
+    remote_key: str = "url"             # key holding a remote server's URL
+    remote_type: str | None = "http"    # "type" value for remote entries; None = no type field
 
     def path(self) -> Path:
         home = _home()
@@ -141,6 +143,8 @@ class JsonHost(Host):
         return False, ""
 
     def native_entry(self, server: Server) -> dict:
+        if server.url:
+            return {**({"type": self.remote_type} if self.remote_type else {}), self.remote_key: server.url}
         if self.supports_cwd:
             command, args, env = server.command, list(server.args), dict(server.env)
         else:
@@ -238,6 +242,8 @@ class CodexHost(Host):
         return (True, found) if found else (False, "")
 
     def native_entry(self, server: Server) -> dict:
+        if server.url:
+            return {"url": server.url}
         entry = {"command": server.command, "args": list(server.args)}
         if server.cwd:
             entry["cwd"] = server.cwd
@@ -266,6 +272,8 @@ class CodexHost(Host):
 
     def _render(self, server: Server) -> str:
         start, end = self._marks(server.name)
+        if server.url:
+            return "\n".join([start, f"[mcp_servers.{_toml_key(server.name)}]", f"url = {_toml_str(server.url)}", end]) + "\n"
         lines = [start, f"[mcp_servers.{_toml_key(server.name)}]",
                  f"command = {_toml_str(server.command)}",
                  "args = [" + ", ".join(_toml_str(a) for a in server.args) + "]"]
@@ -404,6 +412,8 @@ class ClaudeCodeHost(Host):
         return True, found
 
     def native_entry(self, server: Server) -> dict:
+        if server.url:
+            return {"type": "http", "url": server.url}
         command, args, env = launcher_entry(server)
         return {"command": command, "args": args, **({"env": env} if env else {})}
 
@@ -425,10 +435,13 @@ class ClaudeCodeHost(Host):
         backup = state.backup(_home() / ".claude.json", self.id)
         if self.current(server.name) is not None:
             self._run(["mcp", "remove", server.name, "--scope", "user"])
-        args = ["mcp", "add"]
-        if entry.get("env"):
-            args += ["--env", *[f"{k}={v}" for k, v in entry["env"].items()]]
-        args += ["--transport", "stdio", "--scope", "user", server.name, "--", entry["command"], *entry["args"]]
+        if server.url:
+            args = ["mcp", "add", "--transport", "http", "--scope", "user", server.name, server.url]
+        else:
+            args = ["mcp", "add"]
+            if entry.get("env"):
+                args += ["--env", *[f"{k}={v}" for k, v in entry["env"].items()]]
+            args += ["--transport", "stdio", "--scope", "user", server.name, "--", entry["command"], *entry["args"]]
         result = self._run(args)
         if result.returncode != 0:
             raise HostError("HOST_CLI_FAILED", (result.stderr or result.stdout or "")[-400:])
@@ -474,7 +487,8 @@ def registry() -> list[Host]:
                   note="写入 CODEX_HOME/config.toml，区块带标记，写前写后均做 TOML 解析校验。"),
         JsonHost("cursor", "Cursor", "official", "https://cursor.com/docs/mcp",
                  note="~/.cursor/mcp.json；文档未列 cwd 字段，用启动器补齐。",
-                 candidates=(".cursor/mcp.json",), detect_paths=(".cursor",), with_type=True),
+                 candidates=(".cursor/mcp.json",), detect_paths=(".cursor",), with_type=True,
+                 remote_type=None),  # Cursor remote entries are {"url": ...}
         JsonHost("codebuddy", "CodeBuddy", "official", "https://www.workbuddy.ai/docs/cli/mcp",
                  note="用户级取第一个已存在的 ~/.codebuddy/.mcp.json → mcp.json；支持 JSONC。",
                  candidates=(".codebuddy/.mcp.json", ".codebuddy/mcp.json"),
@@ -487,11 +501,12 @@ def registry() -> list[Host]:
                  "https://qwenlm.github.io/qwen-code-docs/en/developers/tools/mcp-server/",
                  note="~/.qwen/settings.json 的 mcpServers，原生支持 cwd；只改 mcpServers，其他设置原样保留。",
                  candidates=(".qwen/settings.json",), detect_paths=(".qwen",), detect_commands=("qwen",),
-                 with_type=False, supports_cwd=True),
+                 with_type=False, supports_cwd=True,
+                 remote_key="httpUrl", remote_type=None),  # Qwen Code: Streamable HTTP servers use httpUrl
         NoLocalHost("qianwen-desktop", "千问桌面版", "none", "本机 ~/Qianwen 与 ~/.qwen-agent 中未发现 MCP 配置",
-                    note="未发现本机 MCP 接入方式；改用 Qwen Code，或等 HTTP 入口。"),
+                    note="未发现本机 MCP 接入方式；改用 Qwen Code，或在支持远程连接器的客户端里添加 https://mcp.sayelf.app/mcp。"),
         NoLocalHost("doubao", "豆包", "none", "未找到官方本机 MCP 接入说明",
-                    note="消费级应用，暂无已知的本机 stdio MCP 接入；等 HTTP 入口（需鉴权）。"),
+                    note="消费级应用，暂无已知的本机 MCP 接入；若其界面支持添加远程 MCP，可手动填 https://mcp.sayelf.app/mcp。"),
         NoLocalHost("openclaw", "太一 / OpenClaw", "none",
                     "https://docs.openclaw.ai/gateway/configuration-reference（MCP 配置移至 config-extensions，格式待核实）",
                     note="官方文档确认支持 MCP，但具体键名与格式未核实；在太一所在机器运行 `openclaw config schema` 后补适配器。"),

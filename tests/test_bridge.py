@@ -225,6 +225,82 @@ class ClaudeCodeTests(Base):
         self.assertEqual("--", add[add.index("demo") + 1])
 
 
+class RemoteTests(Base):
+    URL = "https://mcp.example.test/mcp"
+
+    def setUp(self):
+        super().setUp()
+        self.remote = parse({"name": "sayelf", "url": self.URL})
+
+    def test_manifest_rules(self):
+        self.assertEqual(self.URL, self.remote.url)
+        self.assertEqual({"url": self.URL}, self.remote.entry())
+        with self.assertRaisesRegex(ManifestError, "BAD_URL"):
+            parse({"name": "x", "url": "http://example.com/mcp"})  # plain http only on localhost
+        parse({"name": "x", "url": "http://localhost:8787/mcp"})
+        with self.assertRaisesRegex(ManifestError, "URL_AND_COMMAND"):
+            parse({"name": "x", "url": self.URL, "command": "c"})
+
+    def test_each_json_host_uses_its_own_remote_format(self):
+        ledger = state.Ledger()
+        expected = {"cursor": (".cursor/mcp.json", {"url": self.URL}),
+                    "codebuddy": (".codebuddy/.mcp.json", {"type": "http", "url": self.URL}),
+                    "workbuddy": (".workbuddy/.mcp.json", {"type": "http", "url": self.URL}),
+                    "qwen-code": (".qwen/settings.json", {"httpUrl": self.URL})}
+        for host_id, (rel, entry) in expected.items():
+            H.get(host_id).write(self.remote, ledger)
+            data = json.loads((self.userhome / rel).read_text(encoding="utf-8"))
+            self.assertEqual(entry, data["mcpServers"]["sayelf"], host_id)
+
+    def test_codex_writes_url_table(self):
+        path = self.codex / "config.toml"
+        path.write_text(CODEX_EXISTING, encoding="utf-8")
+        host, ledger = H.get("codex"), state.Ledger()
+        host.write(self.remote, ledger)
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual({"url": self.URL}, data["mcp_servers"]["sayelf"])
+        self.assertIn("cad-hub", data["mcp_servers"])
+        self.assertFalse(host.write(self.remote, ledger)["changed"])
+
+    def test_claude_code_adds_http_transport(self):
+        calls = []
+
+        def runner(args):
+            calls.append(args)
+            code = 1 if args[:2] == ["mcp", "get"] else 0
+            return subprocess.CompletedProcess(args, code, "", "")
+
+        host = H.get("claude-code")
+        host.runner = runner
+        host.write(self.remote, state.Ledger())
+        add = next(c for c in calls if c[:2] == ["mcp", "add"])
+        self.assertEqual(["mcp", "add", "--transport", "http", "--scope", "user", "sayelf", self.URL], add)
+
+    def test_remote_check_accepts_oauth_challenge(self):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Bearer resource_metadata="http://localhost/.well-known/oauth-protected-resource"')
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        ok = handshake(parse({"name": "x", "url": f"http://127.0.0.1:{srv.server_port}/mcp"}), timeout=5)
+        self.assertTrue(ok["ok"], ok)
+        self.assertEqual("oauth", ok["auth"])
+        down = handshake(parse({"name": "x", "url": "http://127.0.0.1:9/mcp"}), timeout=2)
+        self.assertFalse(down["ok"])
+
+
 class ShimTests(unittest.TestCase):
     def test_npm_cmd_shim_resolves_to_real_exe(self):
         with tempfile.TemporaryDirectory() as tmp:

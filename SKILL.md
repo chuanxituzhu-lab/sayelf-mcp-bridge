@@ -1,6 +1,6 @@
 ---
 name: sayelf-mcp-bridge
-description: "Use when an MCP server should be registered into (or removed from) several agent hosts at once — Claude Code, Codex, Cursor, CodeBuddy, WorkBuddy, Qwen Code — or when the user asks which agents can use a local MCP server. Chinese triggers: MCP 接入 / 接入器 / 把 MCP 装到 / 注册 MCP / 所有 Agent 都能用 / MCP 登记 / 撤销 MCP. Not for writing MCP servers themselves (use mcp-builder) or for remote/HTTP connectors."
+description: "Use when an MCP server should be registered into (or removed from) several agent hosts at once — Claude Code, Codex, Cursor, CodeBuddy, WorkBuddy, Qwen Code — or when the user asks which agents can use a local or remote MCP server (e.g. mcp.sayelf.app). Chinese triggers: MCP 接入 / 接入器 / 把 MCP 装到 / 注册 MCP / 所有 Agent 都能用 / MCP 登记 / 撤销 MCP. Not for writing MCP servers themselves (use mcp-builder)."
 metadata:
   short-description: 一份 MCP 服务定义，登记到多个 Agent（先计划、再确认、可回滚）
   aliases: [MCP 接入器, MCP 接入, 注册 MCP, MCP 登记]
@@ -8,14 +8,14 @@ metadata:
 
 # Sayelf MCP 接入器
 
-> 当前内容版本：0.1.0。
+> 当前内容版本：0.2.0（新增远程 MCP：清单写 `url`）。
 
 一个 MCP 服务写一份清单（`servers/<名称>.json`），由本工具按各宿主自己的规则登记进去。只用 Python 标准库。
 
 ## 工作流程（必须按顺序）
 
 1. **看宿主**：`python -m sayelf_mcp_bridge hosts` —— 本机装了哪些 Agent、各自的配置位置、依据等级（official / local / none）。
-2. **自检服务**：`python -m sayelf_mcp_bridge verify <名称>` —— 真实启动服务并完成 MCP 握手，列出工具。失败就停，不要登记。
+2. **自检服务**：`python -m sayelf_mcp_bridge verify <名称>` —— 本地服务：真实启动并完成 MCP 握手，列出工具；远程服务：确认地址可达、并要求 OAuth 登录（或直接可用）。失败就停，不要登记。
 3. **出计划**：`python -m sayelf_mcp_bridge plan <名称> [--hosts a,b]` —— 把将写入每个宿主的内容**原样展示给用户**。
 4. **用户确认后执行**：`python -m sayelf_mcp_bridge install <名称> --yes [--hosts a,b]`。
 5. **核对**：`python -m sayelf_mcp_bridge status <名称>`；提醒用户重启对应 Agent。
@@ -34,5 +34,7 @@ metadata:
 ## 新增一个 MCP 服务
 
 在 `servers/` 放一份 JSON：`name`、`command`、`args`、可选 `cwd`、`env`。占位符：`{python}`、`{skills_root}`、`{home}`。没有 `cwd` 字段的宿主会自动通过启动器补齐工作目录。
+
+远程服务只写 `name`、`description`、`url`（必须 https；本机调试可用 http://localhost）。各宿主按自己的格式登记：Claude Code `--transport http`、Codex `url = …`、Cursor `{"url"}`、CodeBuddy / WorkBuddy `{"type":"http","url"}`、Qwen Code `{"httpUrl"}`。登录（OAuth）在各宿主首次使用时进行，清单里不放任何令牌。现成示例：`servers/sayelf.json`（https://mcp.sayelf.app/mcp）。
 
 宿主规则与出处见 `docs/hosts.md`；同类开源工具的借鉴见 `docs/prior-art.md`。

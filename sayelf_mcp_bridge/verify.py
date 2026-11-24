@@ -16,8 +16,36 @@ from .manifest import Server
 PROTOCOL_VERSION = "2025-06-18"
 
 
+def remote_check(server: Server, timeout: float = 30.0) -> dict:
+    """A remote server is healthy if ``initialize`` answers, or asks for OAuth sign-in (401 with
+    resource metadata, RFC 9728). Sign-in itself happens later, in each host."""
+    import urllib.error
+    import urllib.request
+
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+        "clientInfo": {"name": "sayelf-mcp-bridge", "version": "0.1.0"}}}).encode()
+    request = urllib.request.Request(server.url, data=body, method="POST", headers={
+        "Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+        # Python's default "Python-urllib" agent is blocked by common bot protection (e.g. Cloudflare).
+        "User-Agent": "sayelf-mcp-bridge/0.2"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as res:
+            info = json.loads(res.read().decode("utf-8")).get("result", {}).get("serverInfo", {})
+            return {"ok": True, "remote": server.url, "auth": "none", "server": info.get("name"), "version": info.get("version")}
+    except urllib.error.HTTPError as error:
+        challenge = error.headers.get("WWW-Authenticate", "")
+        if error.code == 401 and "resource_metadata" in challenge:
+            return {"ok": True, "remote": server.url, "auth": "oauth", "note": "每个宿主首次使用时会打开浏览器登录并批准"}
+        return {"ok": False, "error": f"HTTP_{error.code}", "remote": server.url}
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        return {"ok": False, "error": f"UNREACHABLE:{error.__class__.__name__}", "remote": server.url}
+
+
 def handshake(server: Server, timeout: float = 30.0) -> dict:
-    env = {**os.environ, **{k: os.path.expandvars(v) for k, v in server.env.items()}}
+    if server.url:
+        return remote_check(server, timeout)
+    env ={**os.environ, **{k: os.path.expandvars(v) for k, v in server.env.items()}}
     try:
         proc = subprocess.Popen(
             [server.command, *server.args], cwd=server.cwd or None, env=env,

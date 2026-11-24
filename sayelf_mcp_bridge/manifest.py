@@ -9,6 +9,10 @@
   "env": {"SAYELF_OWNER": "human.owner"}
 }
 
+A remote (Streamable HTTP) server has a "url" instead of a command:
+{"name": "sayelf", "description": "...", "url": "https://mcp.sayelf.app/mcp"}
+Hosts register the URL; sign-in (OAuth) happens in each host on first use.
+
 Placeholders expanded at install time: {python} (this interpreter),
 {skills_root} (SAYELF_SKILLS_ROOT, default D:/Codex/skills on Windows,
 ~/.sayelf/skills elsewhere), {home}. Secrets do not belong in manifests:
@@ -51,9 +55,12 @@ class Server:
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     description: str = ""
+    url: str | None = None
 
     def entry(self) -> dict:
-        """Canonical stdio entry used for drift checks and the ledger."""
+        """Canonical entry used for drift checks and the ledger."""
+        if self.url:
+            return {"url": self.url}
         data = {"command": self.command, "args": list(self.args)}
         if self.cwd:
             data["cwd"] = self.cwd
@@ -68,6 +75,13 @@ def parse(data: dict) -> Server:
     name = data.get("name")
     if not isinstance(name, str) or not NAME_RE.match(name):
         raise ManifestError("MANIFEST_BAD_NAME")
+    url = data.get("url")
+    if url is not None:
+        if not isinstance(url, str) or not re.match(r"^(https://|http://(localhost|127\.0\.0\.1)(:\d+)?/)", url):
+            raise ManifestError("MANIFEST_BAD_URL")  # remote servers must use https (plain http only on localhost)
+        if data.get("command"):
+            raise ManifestError("MANIFEST_URL_AND_COMMAND")
+        return Server(name=name, command="", description=str(data.get("description", "")), url=url)
     command = data.get("command")
     if not isinstance(command, str) or not command.strip():
         raise ManifestError("MANIFEST_NO_COMMAND")
